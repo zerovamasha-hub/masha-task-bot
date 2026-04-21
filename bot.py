@@ -106,7 +106,11 @@ async def parse_tasks(text: str) -> list[dict]:
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": text}],
     )
-    return json.loads(response.content[0].text.strip()).get("tasks", [])
+    raw = response.content[0].text.strip()
+    if raw.startswith("```"):
+        lines = raw.split("\n")
+        raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+    return json.loads(raw).get("tasks", [])
 
 
 # ─── Claude: чтение чека ─────────────────────────────────────────────────────
