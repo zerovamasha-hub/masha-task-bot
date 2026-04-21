@@ -106,14 +106,11 @@ async def parse_tasks(text: str) -> list[dict]:
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": text}],
     )
-   if not response.content:
-        logger.error("Empty content from Claude")
+    if not response.content:
+        logger.error("Claude returned empty content")
         return []
     raw = response.content[0].text.strip()
-    logger.info(f"Claude raw: {repr(raw[:300])}")
-    if not raw:
-        logger.error("Empty text from Claude")
-        return []
+    logger.info(f"Claude raw response: {raw[:200]}")
     if raw.startswith("```"):
         lines = raw.split("\n")
         raw = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
