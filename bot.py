@@ -47,6 +47,9 @@ NOTION_CONTEXT_PAGE_ID = "3506e819-ab77-814c-b2bf-cecb528867ad"
 # Файл для хранения напоминаний (переживает рестарт в рамках деплоя)
 REMINDERS_FILE = "/tmp/masha_reminders.json"
 
+# Глобальный scheduler — доступен из хэндлеров
+_scheduler: AsyncIOScheduler = None
+
 # ─── Кеш контекста ───────────────────────────────────────────────────────────
 _context_cache: dict = {"text": "", "updated_at": None}
 
@@ -1048,7 +1051,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         try:
             reminder = await parse_reminder_intent(text)
             remind_at = datetime.fromisoformat(reminder["datetime"]).replace(tzinfo=BALI_TZ)
-            schedule_reminder(context.application.scheduler, context.bot,
+            schedule_reminder(_scheduler, context.bot,
                               reminder["text"], remind_at)
             time_str = remind_at.strftime("%d %B в %H:%M")
             await thinking.edit_text(f"⏰ Напомню {time_str}:\n_{reminder['text']}_",
@@ -1177,7 +1180,7 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if intent == "remind":
         reminder  = await parse_reminder_intent(text)
         remind_at = datetime.fromisoformat(reminder["datetime"]).replace(tzinfo=BALI_TZ)
-        schedule_reminder(context.application.scheduler, context.bot, reminder["text"], remind_at)
+        schedule_reminder(_scheduler, context.bot, reminder["text"], remind_at)
         time_str  = remind_at.strftime("%d %B в %H:%M")
         await thinking.edit_text(f"🎤 «{text}»\n\n⏰ Напомню {time_str}: {reminder['text']}")
         return
@@ -1325,8 +1328,9 @@ def main() -> None:
 
     scheduler = AsyncIOScheduler(timezone=BALI_TZ)
 
-    # Сохраняем scheduler в app, чтобы хэндлеры могли добавлять задания
-    app.scheduler = scheduler
+    # Сохраняем scheduler в глобальную переменную (app не поддерживает __dict__)
+    global _scheduler
+    _scheduler = scheduler
 
     # Утренний брифинг — каждый день в 9:00
     scheduler.add_job(
