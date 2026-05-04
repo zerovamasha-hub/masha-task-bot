@@ -295,6 +295,12 @@ async def detect_intent(text: str) -> str:
     if any(t.startswith(w) for w in done_words):
         return "done"
 
+    # Явное добавление задачи — проверяем ДО query, чтобы «добавь задачу... что нужно» не стало запросом
+    add_words = ["добавь задачу", "добавь таск", "запиши задачу", "внеси задачу",
+                 "добавь в список", "запиши в задачи", "не забудь"]
+    if any(w in t for w in add_words):
+        return "add"
+
     edit_words = ["поменяй", "измени приоритет", "измени дедлайн", "перенеси задачу",
                   "сделай срочной", "сделай срочным", "поставь приоритет", "поставь дедлайн"]
     if any(w in t for w in edit_words):
@@ -309,8 +315,11 @@ async def detect_intent(text: str) -> str:
     if any(w in t for w in remind_words):
         return "remind"
 
-    query_words = ["что ", "покажи", "дашборд", "план на", "какие ", "срочн", "список задач"]
+    # «что» как триггер запроса — только если стоит в начале или это вопрос
+    query_words = ["покажи", "дашборд", "план на", "какие ", "срочн", "список задач"]
     if any(w in t for w in query_words):
+        return "query"
+    if t.startswith("что ") or t.startswith("что?"):
         return "query"
 
     write_words = ["напиши", "составь", "помоги написать", "сделай текст", "напомни текст",
@@ -473,33 +482,47 @@ async def parse_find_keyword(text: str) -> str:
 
 # ─── Notion: добавить задачу ─────────────────────────────────────────────────
 VALID_PROJECTS = {"Golden Goose", "Bedugul Banya", "Fairway", "FlipLab",
-                  "Instagram", "General", "Shopping", "Family"}
+                  "Instagram", "General", "Shopping", "Family", "Семья"}
 
-def _resolve_project(task: dict) -> str:
+ZONE_TO_PROJECT = {
+    "Golden Goose": "Golden Goose",
+    "Fairway":      "Fairway",
+    "FlipLab":      "FlipLab",
+    "Family":       "Семья",
+}
+
+def _resolve_projects(task: dict) -> list[str]:
+    """Возвращает список проектов. Покупки всегда получают Shopping + релевантный проект."""
     explicit = task.get("project", "")
+    zone     = task.get("zone", "")
+
     if task.get("shopping"):
-        zone = task.get("zone", "")
-        if zone == "Family":
-            return "Family"
-        if explicit in ("Golden Goose", "Bedugul Banya", "Fairway", "FlipLab", "Instagram"):
-            return explicit
-        return "Shopping"
+        projects = ["Shopping"]
+        # Добавляем проект по zone (Family→Семья, Golden Goose→Golden Goose и т.д.)
+        zone_project = ZONE_TO_PROJECT.get(zone)
+        if zone_project and zone_project not in projects:
+            projects.append(zone_project)
+        # Добавляем явно указанный проект если он отличается от уже добавленного
+        if explicit in VALID_PROJECTS and explicit not in projects and explicit != "Shopping":
+            projects.append(explicit)
+        return projects
+
     if explicit in VALID_PROJECTS:
-        return explicit
-    return "General"
+        return [explicit]
+    return ["General"]
 
 
 async def add_to_notion(task: dict) -> None:
-    project = _resolve_project(task)
+    projects = _resolve_projects(task)
     props = {
-        "Task":     {"title":    [{"text": {"content": task["task"]}}]},
-        "Zone":     {"select":   {"name": task.get("zone", "Personal")}},
-        "Project":  {"select":   {"name": project}},
-        "Priority": {"select":   {"name": task.get("priority", "Medium")}},
-        "Status":   {"select":   {"name": "To Do"}},
-        "Source":   {"select":   {"name": "Chat"}},
-        "Shopping": {"checkbox": task.get("shopping", False)},
-        "Done":     {"checkbox": False},
+        "Task":     {"title":       [{"text": {"content": task["task"]}}]},
+        "Zone":     {"select":      {"name": task.get("zone", "Personal")}},
+        "Project":  {"multi_select": [{"name": p} for p in projects]},
+        "Priority": {"select":      {"name": task.get("priority", "Medium")}},
+        "Status":   {"select":      {"name": "To Do"}},
+        "Source":   {"select":      {"name": "Chat"}},
+        "Shopping": {"checkbox":    task.get("shopping", False)},
+        "Done":     {"checkbox":    False},
     }
     if task.get("deadline"):
         props["Deadline"] = {"date": {"start": task["deadline"]}}
